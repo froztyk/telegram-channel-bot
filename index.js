@@ -11,7 +11,7 @@ const PRICE = parseFloat(process.env.PRICE_TON);
 const YOUR_WALLET = process.env.TON_WALLET;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 
-// ✅ FIXED ADMIN ID (NUMBER, NOT STRING)
+// ✅ ADMIN ID
 const ADMIN_ID = 8705649572;
 
 const DB_FILE = 'data.json';
@@ -76,7 +76,7 @@ bot.start(async (ctx) => {
     `&text=${encodeURIComponent(memo)}`;
 
   await ctx.reply(
-    `👋 Welcome ${name}\n\nPay <b>${PRICE} TON</b> to unlock.`,
+    `👋 Welcome ${name}\n\nPay <b>${PRICE} TON</b> to unlock content.`,
     {
       parse_mode: 'HTML',
       reply_markup: {
@@ -106,17 +106,18 @@ bot.action('preview', async (ctx) => {
   const media = db.previews.slice(0, 10).map((fileId, i) => ({
     type: 'photo',
     media: fileId,
-    ...(i === 0 && { caption: '👀 Preview' })
+    ...(i === 0 && { caption: '👀 Preview content' })
   }));
 
   await ctx.replyWithMediaGroup(media);
 
   await ctx.reply(
-    `🔥 Channel includes:\n\n` +
+    `🔥 This channel includes:\n\n` +
     `• 150+ pics\n` +
     `• 200+ videos\n` +
-    `• Voice messages\n\n` +
-    `🎥 5–10 min videos 🐾🍑🍒\n\n` +
+    `• Voice messages\n` +
+    `• Weekly updates\n\n` +
+    `🎥 Most videos are 5–10 min long 🐾🍑🍒\n\n` +
     `👤 Admin: @kseniooa\n\n` +
     `💎 Price: <b>${PRICE} TON</b>`,
     { parse_mode: 'HTML' }
@@ -126,7 +127,7 @@ bot.action('preview', async (ctx) => {
 // ================= VERIFY =================
 
 bot.action('verify', async (ctx) => {
-  await ctx.answerCbQuery('Checking...');
+  await ctx.answerCbQuery('Checking payment...');
 
   const db = loadDB();
   db.stats.verify++;
@@ -135,12 +136,25 @@ bot.action('verify', async (ctx) => {
   const userId = String(ctx.from.id);
   const memo = db.pending[userId];
 
-  if (!memo) return ctx.reply('No payment found.');
+  if (!memo) {
+    return ctx.reply('❌ No payment found. Use /start again.');
+  }
 
-  const paid = await checkPayment(YOUR_WALLET, memo, PRICE);
+  await ctx.reply('⏳ Checking blockchain (up to 2 minutes)...');
+
+  const paid = await waitForPayment(YOUR_WALLET, memo, PRICE);
 
   if (!paid) {
-    return ctx.reply('❌ Not detected yet.');
+    return ctx.reply(
+      `❌ Payment not detected yet.\n\nTry again in a minute.`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🔄 Try again', callback_data: 'verify' }]
+          ]
+        }
+      }
+    );
   }
 
   db.paid.push(userId);
@@ -155,31 +169,82 @@ bot.action('verify', async (ctx) => {
   await ctx.reply(`🎉 Access granted:\n${link.invite_link}`);
 });
 
-// ================= ADMIN /SEE COMMAND =================
+// ================= PAYMENT RETRY SYSTEM =================
+
+async function waitForPayment(walletAddress, memo, expectedTon) {
+  const attempts = 12; // 2 minutes
+  const delay = 10000; // 10 sec
+
+  for (let i = 0; i < attempts; i++) {
+    const found = await checkPayment(walletAddress, memo, expectedTon);
+    if (found) return true;
+
+    await new Promise(res => setTimeout(res, delay));
+  }
+
+  return false;
+}
+
+// ================= TON CHECK =================
+
+async function checkPayment(walletAddress, memo, expectedTon) {
+  try {
+    const address = Address.parse(walletAddress);
+    const txs = await client.getTransactions(address, { limit: 100 });
+
+    for (const tx of txs) {
+      const inMsg = tx.inMessage;
+      if (!inMsg) continue;
+
+      let comment = '';
+
+      try {
+        const body = inMsg.body;
+        if (body) {
+          const slice = body.beginParse();
+          if (slice.remainingBits > 0) {
+            try {
+              comment = slice.loadStringTail();
+            } catch {}
+          }
+        }
+      } catch {}
+
+      if (comment && comment.trim() === memo.trim()) {
+        const value = Number(inMsg.info.value.coins) / 1e9;
+
+        if (value >= expectedTon * 0.98) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+
+  } catch (e) {
+    console.error('TON error:', e);
+    return false;
+  }
+}
+
+// ================= ADMIN SEE =================
 
 bot.command('see', async (ctx) => {
-  // ✅ FIXED CHECK
   if (Number(ctx.from.id) !== ADMIN_ID) return;
 
   const db = loadDB();
 
-  const totalStarts = db.stats.start;
-  const previews = db.stats.preview;
-  const verifications = db.stats.verify;
-  const paid = db.paid.length;
-  const pending = Object.keys(db.pending).length;
-
   await ctx.reply(
-    `📊 BOT STATS\n\n` +
-    `🚀 /start used: ${totalStarts}\n` +
-    `👀 preview clicks: ${previews}\n` +
-    `🔍 verify clicks: ${verifications}\n\n` +
-    `💰 Paid users: ${paid}\n` +
-    `⏳ Pending: ${pending}`
+    `📊 STATS\n\n` +
+    `🚀 /start: ${db.stats.start}\n` +
+    `👀 previews: ${db.stats.preview}\n` +
+    `🔍 verify clicks: ${db.stats.verify}\n\n` +
+    `💰 paid users: ${db.paid.length}\n` +
+    `⏳ pending: ${Object.keys(db.pending).length}`
   );
 });
 
-// ================= PHOTO =================
+// ================= PHOTO UPLOAD =================
 
 bot.on('photo', async (ctx) => {
   if (Number(ctx.from.id) !== ADMIN_ID) return;
@@ -193,44 +258,12 @@ bot.on('photo', async (ctx) => {
   await ctx.reply(`Saved (${db.previews.length})`);
 });
 
-// ================= TON CHECK =================
-
-async function checkPayment(walletAddress, memo, expectedTon) {
-  try {
-    const address = Address.parse(walletAddress);
-    const txs = await client.getTransactions(address, { limit: 30 });
-
-    for (const tx of txs) {
-      const inMsg = tx.inMessage;
-      if (!inMsg) continue;
-
-      let comment = '';
-
-      try {
-        const slice = inMsg.body.beginParse();
-        if (slice.remainingBits >= 32 && slice.loadUint(32) === 0) {
-          comment = slice.loadStringTail();
-        }
-      } catch {}
-
-      if (comment === memo) {
-        const value = Number(inMsg.info.value.coins) / 1e9;
-        if (value >= expectedTon * 0.98) return true;
-      }
-    }
-  } catch (e) {
-    console.error(e);
-  }
-
-  return false;
-}
-
 // ================= SERVER =================
 
 app.get('/', (req, res) => res.send('Bot running'));
 app.listen(3000);
 
-// ================= START =================
+// ================= START BOT =================
 
 bot.launch();
 console.log('Bot running');
