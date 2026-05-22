@@ -127,7 +127,7 @@ bot.action('preview', async (ctx) => {
       '?amount=' + nanotons + '&text=' + encodeURIComponent(memo || 'join');
 
     await ctx.reply(
-      '🔥 Full content includes:\n\n• 150+ pics\n• 200+ videos\n• Voice messages\n• Weekly updates\n\n👤 Admin: @kseniooa\n\n💎 Price: <b>' + PRICE + ' TON</b>',
+      '🔥 Channel includes 18+content from creators shown above:\n\n• 150+ pics\n• 200+ videos\n• Voice messages\n•\n\n👤 Admin: @kseniooa\n\n💎 Price: <b>' + PRICE + ' TON</b>',
       {
         parse_mode: 'HTML',
         reply_markup: {
