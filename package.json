@@ -16,5 +16,13 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "telegraf": "^4.16.3"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/froztyk/telegram-channel-bot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/froztyk/telegram-channel-bot/issues"
+  },
+  "homepage": "https://github.com/froztyk/telegram-channel-bot#readme"
 }
