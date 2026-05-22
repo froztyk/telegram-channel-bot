@@ -302,16 +302,39 @@ bot.action('verify', async (ctx) => {
     delete db.pending[userId];
     saveDB(db);
 
-    try {
-      const link = await ctx.telegram.createChatInviteLink(CHANNEL_ID, {
-        member_limit: 1
-      });
+    let inviteLink = null;
+
+    // Try up to 3 times to generate the invite link
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const link = await ctx.telegram.createChatInviteLink(CHANNEL_ID, {
+          member_limit: 1
+        });
+        inviteLink = link.invite_link;
+        break;
+      } catch (e) {
+        console.error(`Invite link attempt ${attempt} failed:`, e.message);
+        if (attempt < 3) await new Promise(r => setTimeout(r, 1500));
+      }
+    }
+
+    if (inviteLink) {
       await ctx.reply(
-        '🎉 Payment confirmed! Welcome!\n\n👉 Your invite link:\n' + link.invite_link + '\n\n⚠️ Single use only — do not share it!'
+        '🎉 Payment confirmed! Welcome!\n\n👉 Your invite link:\n' + inviteLink + '\n\n⚠️ Single use only — do not share it!'
       );
-    } catch (e) {
-      console.error('Invite link error:', e);
-      await ctx.reply('✅ Payment confirmed! Contact @kseniooa for access.');
+    } else {
+      // Link generation failed — notify admin to send it manually
+      await ctx.reply(
+        '✅ Payment confirmed!\n\n⚠️ There was a problem generating your invite link. Please wait — you will receive it shortly.'
+      );
+      try {
+        await bot.telegram.sendMessage(
+          ADMIN_ID,
+          `⚠️ Failed to generate invite link for user ${userId}.\nPlease send them a manual invite link to the channel.`
+        );
+      } catch (adminErr) {
+        console.error('Failed to notify admin:', adminErr.message);
+      }
     }
   } catch (e) {
     console.error('Verify error:', e);
