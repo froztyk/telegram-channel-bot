@@ -143,27 +143,7 @@ bot.action('preview', async (ctx) => {
   }
 });
 
-// ─── Photo upload (admin only) ──────────────────────────────────────────────
-
-bot.on('photo', async (ctx) => {
-  try {
-    if (String(ctx.from.id) !== ADMIN_ID) return;
-
-    // If in ad mode, the message handler below will handle it
-    if (adMode) return;
-
-    const db = loadDB();
-    if (db.previews.length >= 20) {
-      return ctx.reply('❌ Max 20 previews. Use /clearphotos');
-    }
-    const photo = ctx.message.photo.at(-1).file_id;
-    db.previews.push(photo);
-    saveDB(db);
-    await ctx.reply('✅ Saved (' + db.previews.length + '/20)');
-  } catch (e) {
-    console.error('Photo error:', e);
-  }
-});
+// NOTE: photo handling is done inside the unified message handler below
 
 // ─── Admin: /clearphotos ────────────────────────────────────────────────────
 
@@ -227,16 +207,35 @@ bot.command('cancel', async (ctx) => {
   await ctx.reply('❌ Broadcast cancelled.');
 });
 
-bot.on('message', async (ctx) => {
+bot.use(async (ctx, next) => {
+  // Only handle actual messages from admin; pass everything else through
+  if (!ctx.message) return next();
+  if (String(ctx.from?.id) !== ADMIN_ID) return next();
+
   try {
-    if (String(ctx.from.id) !== ADMIN_ID) return;
-    if (!adMode) return;
-
     const text = ctx.message.text;
+    const hasPhoto = !!ctx.message.photo;
+    const hasVideo = !!ctx.message.video;
 
-    // Ignore commands in ad mode
-    if (text === '/ad' || text === '/cancel' || text === '/see') return;
+    // Skip commands — handled by their own handlers
+    if (text && text.startsWith('/')) return next();
 
+    // ── Preview photo save mode (adMode is OFF) ──────────────────────────
+    if (!adMode) {
+      if (hasPhoto) {
+        const db = loadDB();
+        if (db.previews.length >= 20) {
+          return ctx.reply('❌ Max 20 previews. Use /clearphotos');
+        }
+        const photo = ctx.message.photo.at(-1).file_id;
+        db.previews.push(photo);
+        saveDB(db);
+        await ctx.reply('✅ Preview saved (' + db.previews.length + '/20)');
+      }
+      return;
+    }
+
+    // ── Broadcast mode (adMode is ON) ────────────────────────────────────
     const db = loadDB();
     const users = db.users || [];
 
@@ -252,20 +251,20 @@ bot.on('message', async (ctx) => {
 
     for (const userId of users) {
       try {
-        if (text) {
-          await bot.telegram.sendMessage(userId, text);
-        } else if (ctx.message.photo) {
+        if (hasPhoto) {
           await bot.telegram.sendPhoto(
             userId,
             ctx.message.photo.at(-1).file_id,
             { caption: ctx.message.caption || '' }
           );
-        } else if (ctx.message.video) {
+        } else if (hasVideo) {
           await bot.telegram.sendVideo(
             userId,
             ctx.message.video.file_id,
             { caption: ctx.message.caption || '' }
           );
+        } else if (text) {
+          await bot.telegram.sendMessage(userId, text);
         }
         sent++;
       } catch (err) {
@@ -277,7 +276,7 @@ bot.on('message', async (ctx) => {
     adMode = false;
     await ctx.reply(`✅ Broadcast done!\n📨 Sent: ${sent}\n❌ Failed: ${failed}`);
   } catch (e) {
-    console.error('Ad broadcast error:', e);
+    console.error('Admin handler error:', e);
   }
 });
 
