@@ -11,8 +11,8 @@ const PRICE = parseFloat(process.env.PRICE_TON);
 const YOUR_WALLET = process.env.TON_WALLET;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 
-// YOUR TELEGRAM USER ID
-const ADMIN_ID = '8705649572';
+// ✅ ADMIN ID
+const ADMIN_ID = 8705649572;
 
 const DB_FILE = 'data.json';
 
@@ -23,13 +23,19 @@ function loadDB() {
     return {
       pending: {},
       paid: [],
-      previews: []
+      previews: [],
+      stats: {
+        start: 0,
+        preview: 0,
+        verify: 0
+      }
     };
   }
 
   const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
 
   if (!db.previews) db.previews = [];
+  if (!db.stats) db.stats = { start: 0, preview: 0, verify: 0 };
 
   return db;
 }
@@ -44,24 +50,21 @@ const client = new TonClient({
   endpoint: 'https://toncenter.com/api/v2/jsonRPC',
 });
 
-// ================= START COMMAND =================
+// ================= START =================
 
 bot.start(async (ctx) => {
+  const db = loadDB();
+  db.stats.start++;
+  saveDB(db);
+
   const userId = String(ctx.from.id);
   const name = ctx.from.first_name;
 
-  const db = loadDB();
-
-  // Already paid
   if (db.paid.includes(userId)) {
-    return ctx.reply(
-      `✅ Hi ${name}!\n\nYou already have access to the private channel.`
-    );
+    return ctx.reply(`✅ Hi ${name}, you already have access.`);
   }
 
-  // Generate unique memo
   const memo = `join${userId}${Date.now()}`;
-
   db.pending[userId] = memo;
   saveDB(db);
 
@@ -73,319 +76,142 @@ bot.start(async (ctx) => {
     `&text=${encodeURIComponent(memo)}`;
 
   await ctx.reply(
-    `👋 Hello ${name}!\n\n` +
-    `To join the private channel, pay <b>${PRICE} TON</b>.\n\n` +
-    `1️⃣ Tap the payment button\n` +
-    `2️⃣ Confirm payment in Tonkeeper\n` +
-    `3️⃣ Return here and tap "I paid"\n\n` +
-    `👀 You can preview the channel before buying.`,
+    `👋 Welcome ${name}\n\nPay <b>${PRICE} TON</b> to unlock content.`,
     {
       parse_mode: 'HTML',
       reply_markup: {
         inline_keyboard: [
-          [
-            {
-              text: `💎 Pay ${PRICE} TON`,
-              url: tonkeeperLink
-            }
-          ],
-          [
-            {
-              text: '✅ I paid — give me access',
-              callback_data: 'verify'
-            }
-          ],
-          [
-            {
-              text: '👀 See previews',
-              callback_data: 'preview'
-            }
-          ]
+          [{ text: `💎 Pay ${PRICE} TON`, url: tonkeeperLink }],
+          [{ text: '✅ I paid', callback_data: 'verify' }],
+          [{ text: '👀 Preview', callback_data: 'preview' }]
         ]
       }
     }
   );
 });
 
-// ================= PREVIEW BUTTON =================
+// ================= PREVIEW =================
 
 bot.action('preview', async (ctx) => {
   await ctx.answerCbQuery();
 
   const db = loadDB();
+  db.stats.preview++;
+  saveDB(db);
 
   if (db.previews.length === 0) {
-    return ctx.reply('📸 No preview photos added yet.');
+    return ctx.reply('No previews yet.');
   }
 
-  // Split previews into groups of 10
-  const album1 = db.previews.slice(0, 10);
-  const album2 = db.previews.slice(10, 20);
+  const media = db.previews.slice(0, 10).map((fileId, i) => ({
+    type: 'photo',
+    media: fileId,
+    ...(i === 0 && { caption: '👀 Preview content' })
+  }));
 
-  // First album
-  if (album1.length > 0) {
-    const media1 = album1.map((fileId, index) => ({
-      type: 'photo',
-      media: fileId,
-      ...(index === 0 && {
-        caption: '👀 Preview photos (1/2)'
-      })
-    }));
+  await ctx.replyWithMediaGroup(media);
 
-    await ctx.replyWithMediaGroup(media1);
-  }
-
-  // Second album
-  if (album2.length > 0) {
-    const media2 = album2.map((fileId, index) => ({
-      type: 'photo',
-      media: fileId,
-      ...(index === 0 && {
-        caption: '👀 Preview photos (2/2)'
-      })
-    }));
-
-    await ctx.replyWithMediaGroup(media2);
-  }
-
-  // Rebuild payment button
-  const userId = String(ctx.from.id);
-
-  const memo = db.pending[userId];
-
-  const nanotons = Math.floor(PRICE * 1e9);
-
-  const tonkeeperLink =
-    `https://app.tonkeeper.com/transfer/${YOUR_WALLET}` +
-    `?amount=${nanotons}` +
-    `&text=${encodeURIComponent(memo || 'join')}`;
-
-  // Message after previews
   await ctx.reply(
-    `🔥 These are the creators featured inside the private channel.\n\n` +
-    `📦 This channel includes:\n` +
+    `🔥 This channel includes:\n\n` +
     `• 150+ pics\n` +
     `• 200+ videos\n` +
     `• Voice messages\n` +
-    `• New content added weekly\n\n` +
+    `• Weekly updates\n\n` +
+    `🎥 Most videos are 5–10 min long 🐾🍑🍒\n\n` +
     `👤 Admin: @kseniooa\n\n` +
-    `💎 Unlock full access for only <b>${PRICE} TON</b>.`,
-    {
-      parse_mode: 'HTML',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: `💎 Pay ${PRICE} TON`,
-              url: tonkeeperLink
-            }
-          ],
-          [
-            {
-              text: '✅ I paid — give me access',
-              callback_data: 'verify'
-            }
-          ]
-        ]
-      }
-    }
+    `💎 Price: <b>${PRICE} TON</b>`,
+    { parse_mode: 'HTML' }
   );
 });
 
-// ================= ADMIN COMMANDS =================
-
-// Add preview photos
-bot.command('addphoto', async (ctx) => {
-  const userId = String(ctx.from.id);
-
-  if (userId !== ADMIN_ID) return;
-
-  const db = loadDB();
-
-  await ctx.reply(
-    `📸 Send preview photos now.\n\n` +
-    `Currently saved: ${db.previews.length}/20`
-  );
-});
-
-// Clear preview photos
-bot.command('clearphotos', async (ctx) => {
-  const userId = String(ctx.from.id);
-
-  if (userId !== ADMIN_ID) return;
-
-  const db = loadDB();
-
-  db.previews = [];
-
-  saveDB(db);
-
-  await ctx.reply('✅ All preview photos deleted.');
-});
-
-// Check preview count
-bot.command('photostatus', async (ctx) => {
-  const userId = String(ctx.from.id);
-
-  if (userId !== ADMIN_ID) return;
-
-  const db = loadDB();
-
-  await ctx.reply(
-    `📸 Preview photos saved: ${db.previews.length}/20`
-  );
-});
-
-// Receive photos from admin
-bot.on('photo', async (ctx) => {
-  const userId = String(ctx.from.id);
-
-  if (userId !== ADMIN_ID) return;
-
-  const db = loadDB();
-
-  if (db.previews.length >= 20) {
-    return ctx.reply(
-      '❌ Maximum of 20 preview photos reached.\n\nUse /clearphotos first.'
-    );
-  }
-
-  const photo = ctx.message.photo[ctx.message.photo.length - 1];
-
-  const fileId = photo.file_id;
-
-  db.previews.push(fileId);
-
-  saveDB(db);
-
-  await ctx.reply(
-    `✅ Photo saved.\n\n` +
-    `Current total: ${db.previews.length}/20`
-  );
-});
-
-// ================= VERIFY PAYMENT =================
+// ================= VERIFY =================
 
 bot.action('verify', async (ctx) => {
-  await ctx.answerCbQuery('🔍 Checking blockchain...');
-
-  const userId = String(ctx.from.id);
+  await ctx.answerCbQuery('Checking payment...');
 
   const db = loadDB();
+  db.stats.verify++;
+  saveDB(db);
 
+  const userId = String(ctx.from.id);
   const memo = db.pending[userId];
 
   if (!memo) {
-    return ctx.reply(
-      '❌ No pending payment found.\n\nUse /start first.'
-    );
+    return ctx.reply('❌ No payment found. Use /start again.');
   }
 
-  await ctx.reply(
-    '⏳ Verifying your TON payment...'
-  );
+  await ctx.reply('⏳ Checking blockchain (up to 2 minutes)...');
 
-  const paid = await checkPayment(
-    YOUR_WALLET,
-    memo,
-    PRICE
-  );
+  const paid = await waitForPayment(YOUR_WALLET, memo, PRICE);
 
   if (!paid) {
     return ctx.reply(
-      `❌ Payment not found yet.\n\n` +
-      `Make sure:\n` +
-      `• You sent the exact amount\n` +
-      `• You included the memo/comment\n` +
-      `• You wait 1-2 minutes after payment\n\n` +
-      `Then tap the button again.`,
+      `❌ Payment not detected yet.\n\nTry again in a minute.`,
       {
         reply_markup: {
           inline_keyboard: [
-            [
-              {
-                text: '🔄 Check Again',
-                callback_data: 'verify'
-              }
-            ]
+            [{ text: '🔄 Try again', callback_data: 'verify' }]
           ]
         }
       }
     );
   }
 
-  // Mark as paid
   db.paid.push(userId);
-
   delete db.pending[userId];
-
   saveDB(db);
 
-  // Generate invite link
-  try {
-    const link = await bot.telegram.createChatInviteLink(
-      CHANNEL_ID,
-      {
-        member_limit: 1,
-        expire_date:
-          Math.floor(Date.now() / 1000) + 86400
-      }
-    );
+  const link = await bot.telegram.createChatInviteLink(CHANNEL_ID, {
+    member_limit: 1,
+    expire_date: Math.floor(Date.now() / 1000) + 86400
+  });
 
-    await ctx.reply(
-      `🎉 Payment confirmed!\n\n` +
-      `Here is your private invite link:\n\n` +
-      `${link.invite_link}\n\n` +
-      `⚠️ This link works once and expires in 24 hours.`
-    );
-
-  } catch (e) {
-    console.error('Invite link error:', e);
-
-    await ctx.reply(
-      '✅ Payment confirmed!\n\n' +
-      'Please contact admin for access.'
-    );
-  }
+  await ctx.reply(`🎉 Access granted:\n${link.invite_link}`);
 });
 
-// ================= CHECK TON PAYMENT =================
+// ================= PAYMENT RETRY SYSTEM =================
 
-async function checkPayment(
-  walletAddress,
-  memo,
-  expectedTon
-) {
+async function waitForPayment(walletAddress, memo, expectedTon) {
+  const attempts = 12; // 2 minutes
+  const delay = 10000; // 10 sec
+
+  for (let i = 0; i < attempts; i++) {
+    const found = await checkPayment(walletAddress, memo, expectedTon);
+    if (found) return true;
+
+    await new Promise(res => setTimeout(res, delay));
+  }
+
+  return false;
+}
+
+// ================= TON CHECK =================
+
+async function checkPayment(walletAddress, memo, expectedTon) {
   try {
     const address = Address.parse(walletAddress);
-
-    const txs = await client.getTransactions(
-      address,
-      { limit: 30 }
-    );
+    const txs = await client.getTransactions(address, { limit: 100 });
 
     for (const tx of txs) {
       const inMsg = tx.inMessage;
-
       if (!inMsg) continue;
 
       let comment = '';
 
       try {
-        const slice = inMsg.body.beginParse();
-
-        if (
-          slice.remainingBits >= 32 &&
-          slice.loadUint(32) === 0
-        ) {
-          comment = slice.loadStringTail();
+        const body = inMsg.body;
+        if (body) {
+          const slice = body.beginParse();
+          if (slice.remainingBits > 0) {
+            try {
+              comment = slice.loadStringTail();
+            } catch {}
+          }
         }
-
       } catch {}
 
-      if (comment === memo) {
-        const value =
-          Number(inMsg.info.value.coins) / 1e9;
+      if (comment && comment.trim() === memo.trim()) {
+        const value = Number(inMsg.info.value.coins) / 1e9;
 
         if (value >= expectedTon * 0.98) {
           return true;
@@ -393,30 +219,54 @@ async function checkPayment(
       }
     }
 
-  } catch (e) {
-    console.error('TON API error:', e);
-  }
+    return false;
 
-  return false;
+  } catch (e) {
+    console.error('TON error:', e);
+    return false;
+  }
 }
 
-// ================= EXPRESS =================
+// ================= ADMIN SEE =================
 
-app.get('/', (req, res) => {
-  res.send('Bot is running.');
+bot.command('see', async (ctx) => {
+  if (Number(ctx.from.id) !== ADMIN_ID) return;
+
+  const db = loadDB();
+
+  await ctx.reply(
+    `📊 STATS\n\n` +
+    `🚀 /start: ${db.stats.start}\n` +
+    `👀 previews: ${db.stats.preview}\n` +
+    `🔍 verify clicks: ${db.stats.verify}\n\n` +
+    `💰 paid users: ${db.paid.length}\n` +
+    `⏳ pending: ${Object.keys(db.pending).length}`
+  );
 });
 
-app.listen(3000, () => {
-  console.log('🌐 Server running on port 3000');
+// ================= PHOTO UPLOAD =================
+
+bot.on('photo', async (ctx) => {
+  if (Number(ctx.from.id) !== ADMIN_ID) return;
+
+  const db = loadDB();
+  const fileId = ctx.message.photo.pop().file_id;
+
+  db.previews.push(fileId);
+  saveDB(db);
+
+  await ctx.reply(`Saved (${db.previews.length})`);
 });
+
+// ================= SERVER =================
+
+app.get('/', (req, res) => res.send('Bot running'));
+app.listen(3000);
 
 // ================= START BOT =================
 
 bot.launch();
-
-console.log('✅ Telegram bot is running!');
-
-// ================= STOP HANDLERS =================
+console.log('Bot running');
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
