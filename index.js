@@ -11,8 +11,8 @@ const PRICE = parseFloat(process.env.PRICE_TON);
 const YOUR_WALLET = process.env.TON_WALLET;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 
-// YOUR TELEGRAM USER ID
-const ADMIN_ID = '8705649572';
+// ✅ FIXED ADMIN ID (NUMBER, NOT STRING)
+const ADMIN_ID = 8705649572;
 
 const DB_FILE = 'data.json';
 
@@ -26,8 +26,8 @@ function loadDB() {
       previews: [],
       stats: {
         start: 0,
-        verify: 0,
-        preview: 0
+        preview: 0,
+        verify: 0
       }
     };
   }
@@ -35,7 +35,7 @@ function loadDB() {
   const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
 
   if (!db.previews) db.previews = [];
-  if (!db.stats) db.stats = { start: 0, verify: 0, preview: 0 };
+  if (!db.stats) db.stats = { start: 0, preview: 0, verify: 0 };
 
   return db;
 }
@@ -61,7 +61,7 @@ bot.start(async (ctx) => {
   const name = ctx.from.first_name;
 
   if (db.paid.includes(userId)) {
-    return ctx.reply(`✅ Hi ${name}!\n\nYou already have access.`);
+    return ctx.reply(`✅ Hi ${name}, you already have access.`);
   }
 
   const memo = `join${userId}${Date.now()}`;
@@ -76,14 +76,14 @@ bot.start(async (ctx) => {
     `&text=${encodeURIComponent(memo)}`;
 
   await ctx.reply(
-    `👋 Hello ${name}!\n\nPay <b>${PRICE} TON</b> to join.`,
+    `👋 Welcome ${name}\n\nPay <b>${PRICE} TON</b> to unlock.`,
     {
       parse_mode: 'HTML',
       reply_markup: {
         inline_keyboard: [
           [{ text: `💎 Pay ${PRICE} TON`, url: tonkeeperLink }],
           [{ text: '✅ I paid', callback_data: 'verify' }],
-          [{ text: '👀 See previews', callback_data: 'preview' }]
+          [{ text: '👀 Preview', callback_data: 'preview' }]
         ]
       }
     }
@@ -103,9 +103,7 @@ bot.action('preview', async (ctx) => {
     return ctx.reply('No previews yet.');
   }
 
-  const album = db.previews.slice(0, 10);
-
-  const media = album.map((fileId, i) => ({
+  const media = db.previews.slice(0, 10).map((fileId, i) => ({
     type: 'photo',
     media: fileId,
     ...(i === 0 && { caption: '👀 Preview' })
@@ -117,9 +115,8 @@ bot.action('preview', async (ctx) => {
     `🔥 Channel includes:\n\n` +
     `• 150+ pics\n` +
     `• 200+ videos\n` +
-    `• Voice messages\n` +
-    `• Weekly updates\n\n` +
-    `🎥 Most videos are 5-10 min long that contains 🐾🍑🍒\n\n` +
+    `• Voice messages\n\n` +
+    `🎥 5–10 min videos 🐾🍑🍒\n\n` +
     `👤 Admin: @kseniooa\n\n` +
     `💎 Price: <b>${PRICE} TON</b>`,
     { parse_mode: 'HTML' }
@@ -143,7 +140,7 @@ bot.action('verify', async (ctx) => {
   const paid = await checkPayment(YOUR_WALLET, memo, PRICE);
 
   if (!paid) {
-    return ctx.reply('❌ Not found yet.');
+    return ctx.reply('❌ Not detected yet.');
   }
 
   db.paid.push(userId);
@@ -158,23 +155,23 @@ bot.action('verify', async (ctx) => {
   await ctx.reply(`🎉 Access granted:\n${link.invite_link}`);
 });
 
-// ================= ADMIN SEE COMMAND =================
+// ================= ADMIN /SEE COMMAND =================
 
 bot.command('see', async (ctx) => {
-  const userId = String(ctx.from.id);
-  if (userId !== ADMIN_ID) return;
+  // ✅ FIXED CHECK
+  if (Number(ctx.from.id) !== ADMIN_ID) return;
 
   const db = loadDB();
 
-  const totalUsers = db.stats.start;
+  const totalStarts = db.stats.start;
   const previews = db.stats.preview;
   const verifications = db.stats.verify;
   const paid = db.paid.length;
   const pending = Object.keys(db.pending).length;
 
   await ctx.reply(
-    `📊 BOT ANALYTICS\n\n` +
-    `👥 /start used: ${totalUsers}\n` +
+    `📊 BOT STATS\n\n` +
+    `🚀 /start used: ${totalStarts}\n` +
     `👀 preview clicks: ${previews}\n` +
     `🔍 verify clicks: ${verifications}\n\n` +
     `💰 Paid users: ${paid}\n` +
@@ -182,20 +179,15 @@ bot.command('see', async (ctx) => {
   );
 });
 
-// ================= PHOTO SYSTEM =================
-
-bot.command('addphoto', async (ctx) => {
-  if (String(ctx.from.id) !== ADMIN_ID) return;
-  await ctx.reply('Send photos now.');
-});
+// ================= PHOTO =================
 
 bot.on('photo', async (ctx) => {
-  if (String(ctx.from.id) !== ADMIN_ID) return;
+  if (Number(ctx.from.id) !== ADMIN_ID) return;
 
   const db = loadDB();
-  const photo = ctx.message.photo.pop().file_id;
+  const fileId = ctx.message.photo.pop().file_id;
 
-  db.previews.push(photo);
+  db.previews.push(fileId);
   saveDB(db);
 
   await ctx.reply(`Saved (${db.previews.length})`);
@@ -238,7 +230,7 @@ async function checkPayment(walletAddress, memo, expectedTon) {
 app.get('/', (req, res) => res.send('Bot running'));
 app.listen(3000);
 
-// ================= START BOT =================
+// ================= START =================
 
 bot.launch();
 console.log('Bot running');
