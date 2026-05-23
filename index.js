@@ -9,24 +9,34 @@ const app = express();
 
 const PRICE = parseFloat(process.env.PRICE_TON);
 const YOUR_WALLET = process.env.TON_WALLET;
-const CHANNEL_ID = process.env.CHANNEL_ID;           // TON channel
-const STARS_CHANNEL_ID = '-1003605323076';            // Stars channel
-const STARS_PRICE = 2500;                             // Price in Telegram Stars
+const CHANNEL_ID = process.env.CHANNEL_ID;
+const STARS_CHANNEL_ID = '-1003605323076';
+const STARS_PRICE = 2500;
 const ADMIN_ID = process.env.ADMIN_ID;
 
 const DB_FILE = 'data.json';
 
 function loadDB() {
   if (!fs.existsSync(DB_FILE)) {
-    return { pending: {}, paid: [], paidStars: [], previews: [], users: [], stats: { starts: 0, previewClicks: 0 } };
+    return {
+      pending: {},
+      paid: [],
+      paidStars: [],
+      previews: [],
+      adultPreviews: [],   // NEW: album for 18+ preview
+      users: [],
+      stats: { starts: 0, previewClicks: 0, adultPreviewClicks: 0 }
+    };
   }
   const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
   if (!db.previews) db.previews = [];
+  if (!db.adultPreviews) db.adultPreviews = [];
   if (!db.users) db.users = [];
   if (!db.paidStars) db.paidStars = [];
-  if (!db.stats) db.stats = { starts: 0, previewClicks: 0 };
+  if (!db.stats) db.stats = { starts: 0, previewClicks: 0, adultPreviewClicks: 0 };
   if (!db.stats.starts) db.stats.starts = 0;
   if (!db.stats.previewClicks) db.stats.previewClicks = 0;
+  if (!db.stats.adultPreviewClicks) db.stats.adultPreviewClicks = 0;
   return db;
 }
 
@@ -76,7 +86,8 @@ bot.command('start', async (ctx) => {
             [{ text: '💎 Buy for ' + PRICE + ' TON ~46$', url: tonkeeperLink }],
             [{ text: '⭐ Buy for ' + STARS_PRICE + ' Stars ~60$', callback_data: 'buy_stars' }],
             [{ text: '✅ I paid (TON)', callback_data: 'verify' }],
-            [{ text: '👀 See previews', callback_data: 'preview' }]
+            [{ text: '👀 See previews', callback_data: 'preview' }],
+            [{ text: '🔞 18+ Preview', callback_data: 'adult_preview' }]
           ]
         }
       }
@@ -107,8 +118,7 @@ bot.action('buy_stars', async (ctx) => {
   }
 });
 
-
-// ─── Preview ────────────────────────────────────────────────────────────────
+// ─── Preview (original) ──────────────────────────────────────────────────────
 
 bot.action('preview', async (ctx) => {
   try { await ctx.answerCbQuery(); } catch {}
@@ -168,6 +178,141 @@ bot.action('preview', async (ctx) => {
   }
 });
 
+// ─── 18+ Preview: send random item ──────────────────────────────────────────
+
+async function sendRandomAdultPreview(ctx) {
+  const db = loadDB();
+
+  if (!db.adultPreviews || db.adultPreviews.length === 0) {
+    return ctx.reply('📸 No 18+ previews available yet.');
+  }
+
+  const item = db.adultPreviews[Math.floor(Math.random() * db.adultPreviews.length)];
+
+  const seeMoreKeyboard = {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '👁 See more', callback_data: 'adult_preview_more' }],
+        [{ text: '💎 Buy for ' + PRICE + ' TON', callback_data: 'show_buy' }]
+      ]
+    }
+  };
+
+  try {
+    if (item.type === 'photo') {
+      await ctx.replyWithPhoto(item.fileId, {
+        caption: '🔞 18+ Preview\n\nWant full access? Buy now 👇',
+        ...seeMoreKeyboard
+      });
+    } else if (item.type === 'video') {
+      await ctx.replyWithVideo(item.fileId, {
+        caption: '🔞 18+ Preview\n\nWant full access? Buy now 👇',
+        ...seeMoreKeyboard
+      });
+    }
+  } catch (e) {
+    console.error('Send adult preview error:', e);
+    await ctx.reply('⚠️ Could not load preview. Try again.');
+  }
+}
+
+// ─── 18+ Preview button ──────────────────────────────────────────────────────
+
+bot.action('adult_preview', async (ctx) => {
+  try { await ctx.answerCbQuery(); } catch {}
+  try {
+    const db = loadDB();
+    db.stats.adultPreviewClicks += 1;
+    saveDB(db);
+    await sendRandomAdultPreview(ctx);
+  } catch (e) {
+    console.error('Adult preview error:', e);
+  }
+});
+
+// ─── "See more" button ────────────────────────────────────────────────────────
+
+bot.action('adult_preview_more', async (ctx) => {
+  try { await ctx.answerCbQuery(); } catch {}
+  try {
+    await sendRandomAdultPreview(ctx);
+  } catch (e) {
+    console.error('Adult preview more error:', e);
+  }
+});
+
+// ─── Show buy keyboard (fallback) ────────────────────────────────────────────
+
+bot.action('show_buy', async (ctx) => {
+  try { await ctx.answerCbQuery(); } catch {}
+  try {
+    const userId = String(ctx.from.id);
+    const db = loadDB();
+    const memo = db.pending[userId] || ('join' + userId + Date.now());
+    if (!db.pending[userId]) {
+      db.pending[userId] = memo;
+      saveDB(db);
+    }
+    const nanotons = Math.floor(PRICE * 1e9);
+    const tonkeeperLink =
+      'https://app.tonkeeper.com/transfer/' + YOUR_WALLET +
+      '?amount=' + nanotons + '&text=' + encodeURIComponent(memo);
+
+    await ctx.reply(
+      '💎 Get full access for <b>' + PRICE + ' TON</b>',
+      {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '💎 Buy for ' + PRICE + ' TON', url: tonkeeperLink }],
+            [{ text: '⭐ Buy for ' + STARS_PRICE + ' Stars', callback_data: 'buy_stars' }],
+            [{ text: '✅ I paid (TON)', callback_data: 'verify' }]
+          ]
+        }
+      }
+    );
+  } catch (e) {
+    console.error('Show buy error:', e);
+  }
+});
+
+// ─── Admin: /preview (upload 18+ album) ──────────────────────────────────────
+
+let previewMode = false;
+
+bot.command('preview', async (ctx) => {
+  if (String(ctx.from.id) !== ADMIN_ID) return;
+  previewMode = true;
+  const db = loadDB();
+  await ctx.reply(
+    `📥 Preview upload mode ON.\n\nSend photos/videos one by one (up to 200).\nCurrent album size: ${db.adultPreviews.length}\n\nType /donepreview when finished.`
+  );
+});
+
+bot.command('donepreview', async (ctx) => {
+  if (String(ctx.from.id) !== ADMIN_ID) return;
+  previewMode = false;
+  const db = loadDB();
+  await ctx.reply(`✅ Preview upload finished. Album now has ${db.adultPreviews.length} items.`);
+});
+
+// ─── Admin: /deletepreview ────────────────────────────────────────────────────
+
+bot.command('deletepreview', async (ctx) => {
+  if (String(ctx.from.id) !== ADMIN_ID) return;
+  try {
+    const db = loadDB();
+    if (!db.adultPreviews || db.adultPreviews.length === 0) {
+      return ctx.reply('⚠️ Album is already empty.');
+    }
+    const removed = db.adultPreviews.pop();
+    saveDB(db);
+    await ctx.reply(`🗑️ Removed last item (${removed.type}). Album now has ${db.adultPreviews.length} items.`);
+  } catch (e) {
+    console.error('Deletepreview error:', e);
+  }
+});
+
 // ─── Admin: /clearphotos ────────────────────────────────────────────────────
 
 bot.command('clearphotos', async (ctx) => {
@@ -176,7 +321,7 @@ bot.command('clearphotos', async (ctx) => {
     const db = loadDB();
     db.previews = [];
     saveDB(db);
-    await ctx.reply('🗑️ All previews cleared.');
+    await ctx.reply('🗑️ All (regular) previews cleared.');
   } catch (e) {
     console.error('Clearphotos error:', e);
   }
@@ -206,6 +351,8 @@ bot.command('see', async (ctx) => {
       `👥 Unique users: ${db.users.length}\n` +
       `🚀 Total /start: ${db.stats.starts}\n` +
       `👀 Preview clicks: ${db.stats.previewClicks}\n` +
+      `🔞 18+ Preview clicks: ${db.stats.adultPreviewClicks}\n` +
+      `📸 18+ Album size: ${db.adultPreviews.length}\n` +
       `💎 Paid (TON): ${db.paid.length}\n` +
       `⭐ Paid (Stars): ${db.paidStars.length}\n` +
       `⏳ Pending payment: ${Object.keys(db.pending).length}`
@@ -228,8 +375,11 @@ bot.command('ad', async (ctx) => {
 bot.command('cancel', async (ctx) => {
   if (String(ctx.from.id) !== ADMIN_ID) return;
   adMode = false;
-  await ctx.reply('❌ Broadcast cancelled.');
+  previewMode = false;
+  await ctx.reply('❌ Cancelled.');
 });
+
+// ─── Admin message handler ───────────────────────────────────────────────────
 
 bot.use(async (ctx, next) => {
   if (!ctx.message) return next();
@@ -242,59 +392,81 @@ bot.use(async (ctx, next) => {
 
     if (text && text.startsWith('/')) return next();
 
-    if (!adMode) {
+    // ── 18+ preview upload mode ──
+    if (previewMode) {
+      const db = loadDB();
+      if (db.adultPreviews.length >= 200) {
+        return ctx.reply('❌ Max 200 items reached. Use /deletepreview to make room.');
+      }
       if (hasPhoto) {
-        const db = loadDB();
-        if (db.previews.length >= 20) {
-          return ctx.reply('❌ Max 20 previews. Use /clearphotos');
-        }
-        const photo = ctx.message.photo.at(-1).file_id;
-        db.previews.push(photo);
+        const fileId = ctx.message.photo.at(-1).file_id;
+        db.adultPreviews.push({ type: 'photo', fileId });
         saveDB(db);
-        await ctx.reply('✅ Preview saved (' + db.previews.length + '/20)');
+        return ctx.reply(`✅ Photo saved to 18+ album (${db.adultPreviews.length}/200)`);
+      } else if (hasVideo) {
+        const fileId = ctx.message.video.file_id;
+        db.adultPreviews.push({ type: 'video', fileId });
+        saveDB(db);
+        return ctx.reply(`✅ Video saved to 18+ album (${db.adultPreviews.length}/200)`);
+      } else {
+        return ctx.reply('⚠️ Send a photo or video. Type /donepreview when done.');
       }
-      return;
     }
 
-    const db = loadDB();
-    const users = db.users || [];
+    // ── Broadcast (ad) mode ──
+    if (adMode) {
+      const db = loadDB();
+      const users = db.users || [];
 
-    if (users.length === 0) {
-      adMode = false;
-      return ctx.reply('⚠️ No users to send to.');
-    }
+      if (users.length === 0) {
+        adMode = false;
+        return ctx.reply('⚠️ No users to send to.');
+      }
 
-    await ctx.reply(`📤 Sending to ${users.length} users...`);
+      await ctx.reply(`📤 Sending to ${users.length} users...`);
 
-    let sent = 0;
-    let failed = 0;
+      let sent = 0;
+      let failed = 0;
 
-    for (const userId of users) {
-      try {
-        if (hasPhoto) {
-          await bot.telegram.sendPhoto(
-            userId,
-            ctx.message.photo.at(-1).file_id,
-            { caption: ctx.message.caption || '' }
-          );
-        } else if (hasVideo) {
-          await bot.telegram.sendVideo(
-            userId,
-            ctx.message.video.file_id,
-            { caption: ctx.message.caption || '' }
-          );
-        } else if (text) {
-          await bot.telegram.sendMessage(userId, text);
+      for (const userId of users) {
+        try {
+          if (hasPhoto) {
+            await bot.telegram.sendPhoto(
+              userId,
+              ctx.message.photo.at(-1).file_id,
+              { caption: ctx.message.caption || '' }
+            );
+          } else if (hasVideo) {
+            await bot.telegram.sendVideo(
+              userId,
+              ctx.message.video.file_id,
+              { caption: ctx.message.caption || '' }
+            );
+          } else if (text) {
+            await bot.telegram.sendMessage(userId, text);
+          }
+          sent++;
+        } catch (err) {
+          console.error(`Failed to send to ${userId}:`, err.message);
+          failed++;
         }
-        sent++;
-      } catch (err) {
-        console.error(`Failed to send to ${userId}:`, err.message);
-        failed++;
       }
+
+      adMode = false;
+      return ctx.reply(`✅ Broadcast done!\n📨 Sent: ${sent}\n❌ Failed: ${failed}`);
     }
 
-    adMode = false;
-    await ctx.reply(`✅ Broadcast done!\n📨 Sent: ${sent}\n❌ Failed: ${failed}`);
+    // ── Default: add to regular previews ──
+    if (hasPhoto) {
+      const db = loadDB();
+      if (db.previews.length >= 20) {
+        return ctx.reply('❌ Max 20 regular previews. Use /clearphotos');
+      }
+      const photo = ctx.message.photo.at(-1).file_id;
+      db.previews.push(photo);
+      saveDB(db);
+      await ctx.reply('✅ Regular preview saved (' + db.previews.length + '/20)');
+    }
   } catch (e) {
     console.error('Admin handler error:', e);
   }
