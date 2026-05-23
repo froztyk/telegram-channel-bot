@@ -9,18 +9,21 @@ const app = express();
 
 const PRICE = parseFloat(process.env.PRICE_TON);
 const YOUR_WALLET = process.env.TON_WALLET;
-const CHANNEL_ID = process.env.CHANNEL_ID;
+const CHANNEL_ID = process.env.CHANNEL_ID;           // TON channel
+const STARS_CHANNEL_ID = '-1003605323076';            // Stars channel
+const STARS_PRICE = 2500;                             // Price in Telegram Stars
 const ADMIN_ID = process.env.ADMIN_ID;
 
 const DB_FILE = 'data.json';
 
 function loadDB() {
   if (!fs.existsSync(DB_FILE)) {
-    return { pending: {}, paid: [], previews: [], users: [], stats: { starts: 0, previewClicks: 0 } };
+    return { pending: {}, paid: [], paidStars: [], previews: [], users: [], stats: { starts: 0, previewClicks: 0 } };
   }
   const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
   if (!db.previews) db.previews = [];
   if (!db.users) db.users = [];
+  if (!db.paidStars) db.paidStars = [];
   if (!db.stats) db.stats = { starts: 0, previewClicks: 0 };
   if (!db.stats.starts) db.stats.starts = 0;
   if (!db.stats.previewClicks) db.stats.previewClicks = 0;
@@ -43,7 +46,6 @@ bot.command('start', async (ctx) => {
     const name = ctx.from.first_name;
     const db = loadDB();
 
-    // Track unique users and starts
     if (!db.users.includes(userId)) {
       db.users.push(userId);
     }
@@ -71,8 +73,9 @@ bot.command('start', async (ctx) => {
         parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
-            [{ text: '💎 Pay ' + PRICE + ' TON', url: tonkeeperLink }],
-            [{ text: '✅ I paid', callback_data: 'verify' }],
+            [{ text: '💎 Buy for ' + PRICE + ' TON', url: tonkeeperLink }],
+            [{ text: '⭐ Buy for ' + STARS_PRICE + ' Stars', callback_data: 'buy_stars' }],
+            [{ text: '✅ I paid (TON)', callback_data: 'verify' }],
             [{ text: '👀 See previews', callback_data: 'preview' }]
           ]
         }
@@ -83,6 +86,89 @@ bot.command('start', async (ctx) => {
   }
 });
 
+// ─── Stars purchase ─────────────────────────────────────────────────────────
+
+bot.action('buy_stars', async (ctx) => {
+  try { await ctx.answerCbQuery(); } catch {}
+  try {
+    await ctx.replyWithInvoice(
+      'Channel Access',
+      'Get exclusive access to the channel for ' + STARS_PRICE + ' Telegram Stars.',
+      'stars_channel_access',
+      'XTR',
+      [{ label: 'Channel Access', amount: STARS_PRICE }]
+    );
+  } catch (e) {
+    console.error('Stars invoice error:', e);
+    await ctx.reply('⚠️ Could not create Stars invoice. Please try again later.');
+  }
+});
+
+// ─── Pre-checkout query (must be answered within 10s) ──────────────────────
+
+bot.on('pre_checkout_query', async (ctx) => {
+  try {
+    await ctx.answerPreCheckoutQuery(true);
+  } catch (e) {
+    console.error('Pre-checkout error:', e);
+  }
+});
+
+// ─── Successful Stars payment ───────────────────────────────────────────────
+
+bot.on('message', async (ctx, next) => {
+  if (ctx.message && ctx.message.successful_payment) {
+    const payment = ctx.message.successful_payment;
+    if (
+      payment.invoice_payload === 'stars_channel_access' &&
+      payment.currency === 'XTR'
+    ) {
+      const userId = String(ctx.from.id);
+      const db = loadDB();
+
+      if (!db.paidStars.includes(userId)) {
+        db.paidStars.push(userId);
+        saveDB(db);
+      }
+
+      let inviteLink = null;
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const link = await ctx.telegram.createChatInviteLink(STARS_CHANNEL_ID, {
+            member_limit: 1
+          });
+          inviteLink = link.invite_link;
+          break;
+        } catch (e) {
+          console.error(`Stars invite link attempt ${attempt} failed:`, e.message);
+          if (attempt < 3) await new Promise(r => setTimeout(r, 1500));
+        }
+      }
+
+      if (inviteLink) {
+        await ctx.reply(
+          '🎉 Payment confirmed! Welcome!\n\n👉 Your invite link:\n' + inviteLink + '\n\n⚠️ Single use only — do not share it!'
+        );
+      } else {
+        await ctx.reply(
+          '✅ Payment confirmed!\n\n⚠️ There was a problem generating your invite link. Please wait — you will receive it shortly.'
+        );
+        try {
+          await bot.telegram.sendMessage(
+            ADMIN_ID,
+            `⚠️ Stars payment received but invite link failed for user ${userId}.\nPlease send them a manual invite to the Stars channel.`
+          );
+        } catch (adminErr) {
+          console.error('Failed to notify admin:', adminErr.message);
+        }
+      }
+      return;
+    }
+  }
+  return next();
+});
+
 // ─── Preview ────────────────────────────────────────────────────────────────
 
 bot.action('preview', async (ctx) => {
@@ -90,7 +176,6 @@ bot.action('preview', async (ctx) => {
   try {
     const db = loadDB();
 
-    // Track preview clicks
     db.stats.previewClicks += 1;
     saveDB(db);
 
@@ -132,8 +217,9 @@ bot.action('preview', async (ctx) => {
         parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
-            [{ text: '💎 Pay ' + PRICE + ' TON', url: tonkeeperLink }],
-            [{ text: '✅ I paid', callback_data: 'verify' }]
+            [{ text: '💎 Buy for ' + PRICE + ' TON', url: tonkeeperLink }],
+            [{ text: '⭐ Buy for ' + STARS_PRICE + ' Stars', callback_data: 'buy_stars' }],
+            [{ text: '✅ I paid (TON)', callback_data: 'verify' }]
           ]
         }
       }
@@ -142,8 +228,6 @@ bot.action('preview', async (ctx) => {
     console.error('Preview error:', e);
   }
 });
-
-// NOTE: photo handling is done inside the unified message handler below
 
 // ─── Admin: /clearphotos ────────────────────────────────────────────────────
 
@@ -183,7 +267,8 @@ bot.command('see', async (ctx) => {
       `👥 Unique users: ${db.users.length}\n` +
       `🚀 Total /start: ${db.stats.starts}\n` +
       `👀 Preview clicks: ${db.stats.previewClicks}\n` +
-      `💎 Paid: ${db.paid.length}\n` +
+      `💎 Paid (TON): ${db.paid.length}\n` +
+      `⭐ Paid (Stars): ${db.paidStars.length}\n` +
       `⏳ Pending payment: ${Object.keys(db.pending).length}`
     );
   } catch (e) {
@@ -208,7 +293,6 @@ bot.command('cancel', async (ctx) => {
 });
 
 bot.use(async (ctx, next) => {
-  // Only handle actual messages from admin; pass everything else through
   if (!ctx.message) return next();
   if (String(ctx.from?.id) !== ADMIN_ID) return next();
 
@@ -217,10 +301,8 @@ bot.use(async (ctx, next) => {
     const hasPhoto = !!ctx.message.photo;
     const hasVideo = !!ctx.message.video;
 
-    // Skip commands — handled by their own handlers
     if (text && text.startsWith('/')) return next();
 
-    // ── Preview photo save mode (adMode is OFF) ──────────────────────────
     if (!adMode) {
       if (hasPhoto) {
         const db = loadDB();
@@ -235,7 +317,6 @@ bot.use(async (ctx, next) => {
       return;
     }
 
-    // ── Broadcast mode (adMode is ON) ────────────────────────────────────
     const db = loadDB();
     const users = db.users || [];
 
@@ -280,7 +361,7 @@ bot.use(async (ctx, next) => {
   }
 });
 
-// ─── Verify payment ─────────────────────────────────────────────────────────
+// ─── Verify TON payment ─────────────────────────────────────────────────────
 
 bot.action('verify', async (ctx) => {
   try { await ctx.answerCbQuery('Checking...'); } catch {}
@@ -303,7 +384,6 @@ bot.action('verify', async (ctx) => {
 
     let inviteLink = null;
 
-    // Try up to 3 times to generate the invite link
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const link = await ctx.telegram.createChatInviteLink(CHANNEL_ID, {
@@ -322,7 +402,6 @@ bot.action('verify', async (ctx) => {
         '🎉 Payment confirmed! Welcome!\n\n👉 Your invite link:\n' + inviteLink + '\n\n⚠️ Single use only — do not share it!'
       );
     } else {
-      // Link generation failed — notify admin to send it manually
       await ctx.reply(
         '✅ Payment confirmed!\n\n⚠️ There was a problem generating your invite link. Please wait — you will receive it shortly.'
       );
