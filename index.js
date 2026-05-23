@@ -74,7 +74,7 @@ bot.command('start', async (ctx) => {
         reply_markup: {
           inline_keyboard: [
             [{ text: '💎 Buy for ' + PRICE + ' TON ~46$', url: tonkeeperLink }],
-            [{ text: '⭐ Buy for ' + STARS_PRICE + ' Stars', callback_data: 'buy_stars' }],
+            [{ text: '⭐ Buy for ' + STARS_PRICE + ' Stars ~60$', callback_data: 'buy_stars' }],
             [{ text: '✅ I paid (TON)', callback_data: 'verify' }],
             [{ text: '👀 See previews', callback_data: 'preview' }]
           ]
@@ -97,7 +97,7 @@ bot.action('buy_stars', async (ctx) => {
         parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
-            [{ text: '⭐ Join for ' + STARS_PRICE + ' Stars ~60$', url: 'https://t.me/+1sGbJzUH4g00NjZh' }]
+            [{ text: '⭐ Join for ' + STARS_PRICE + ' Stars', url: 'https://t.me/+1sGbJzUH4g00NjZh' }]
           ]
         }
       }
