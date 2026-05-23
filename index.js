@@ -91,7 +91,7 @@ bot.command('start', async (ctx) => {
 bot.action('buy_stars', async (ctx) => {
   try { await ctx.answerCbQuery(); } catch {}
   try {
-    await ctx.telegram.sendInvoice(ctx.chat.id, {
+    await ctx.telegram.sendInvoice(STARS_CHANNEL_ID, {
       title: 'Channel Access',
       description: 'Get exclusive access to the channel for ' + STARS_PRICE + ' Telegram Stars.',
       payload: 'stars_channel_access',
@@ -135,7 +135,7 @@ bot.on('message', async (ctx, next) => {
 
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const link = await ctx.telegram.createChatInviteLink(STARS_CHANNEL_ID, {
+          const link = await ctx.telegram.createChatInviteLink(CHANNEL_ID, {
             member_limit: 1
           });
           inviteLink = link.invite_link;
