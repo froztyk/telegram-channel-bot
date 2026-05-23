@@ -23,7 +23,8 @@ function loadDB() {
       paid: [],
       paidStars: [],
       previews: [],
-      adultPreviews: [],   // NEW: album for 18+ preview
+      adultPreviews: [],
+      adultPreviewUsers: [],
       users: [],
       stats: { starts: 0, previewClicks: 0, adultPreviewClicks: 0 }
     };
@@ -31,6 +32,7 @@ function loadDB() {
   const db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
   if (!db.previews) db.previews = [];
   if (!db.adultPreviews) db.adultPreviews = [];
+  if (!db.adultPreviewUsers) db.adultPreviewUsers = [];
   if (!db.users) db.users = [];
   if (!db.paidStars) db.paidStars = [];
   if (!db.stats) db.stats = { starts: 0, previewClicks: 0, adultPreviewClicks: 0 };
@@ -161,7 +163,7 @@ bot.action('preview', async (ctx) => {
       '?amount=' + nanotons + '&text=' + encodeURIComponent(memo || 'join');
 
     await ctx.reply(
-      '🔥 Channel includes 18+content from creators shown above:\n\n• 150+ pics\n• 200+ videos\n• Voice messages\n•\n\n👤 Admin: @kseniooa\n\n💎 Price: <b>' + PRICE + ' TON</b>',
+      '🔥 Channel includes 18+ content from creators shown above:\n\n• 150+ pics\n• 200+ videos\n• Voice messages\n\n👤 Admin: @kseniooa\n\n💎 Price: <b>' + PRICE + ' TON</b>',
       {
         parse_mode: 'HTML',
         reply_markup: {
@@ -221,8 +223,12 @@ async function sendRandomAdultPreview(ctx) {
 bot.action('adult_preview', async (ctx) => {
   try { await ctx.answerCbQuery(); } catch {}
   try {
+    const userId = String(ctx.from.id);
     const db = loadDB();
     db.stats.adultPreviewClicks += 1;
+    if (!db.adultPreviewUsers.includes(userId)) {
+      db.adultPreviewUsers.push(userId);
+    }
     saveDB(db);
     await sendRandomAdultPreview(ctx);
   } catch (e) {
@@ -235,13 +241,16 @@ bot.action('adult_preview', async (ctx) => {
 bot.action('adult_preview_more', async (ctx) => {
   try { await ctx.answerCbQuery(); } catch {}
   try {
+    const db = loadDB();
+    db.stats.adultPreviewClicks += 1;
+    saveDB(db);
     await sendRandomAdultPreview(ctx);
   } catch (e) {
     console.error('Adult preview more error:', e);
   }
 });
 
-// ─── Show buy keyboard (fallback) ────────────────────────────────────────────
+// ─── Show buy keyboard ────────────────────────────────────────────────────────
 
 bot.action('show_buy', async (ctx) => {
   try { await ctx.answerCbQuery(); } catch {}
@@ -321,7 +330,7 @@ bot.command('clearphotos', async (ctx) => {
     const db = loadDB();
     db.previews = [];
     saveDB(db);
-    await ctx.reply('🗑️ All (regular) previews cleared.');
+    await ctx.reply('🗑️ All regular previews cleared.');
   } catch (e) {
     console.error('Clearphotos error:', e);
   }
@@ -346,12 +355,17 @@ bot.command('see', async (ctx) => {
   try {
     if (String(ctx.from.id) !== ADMIN_ID) return;
     const db = loadDB();
+
+    const totalClicks = db.stats.adultPreviewClicks;
+    const uniqueUsers = db.adultPreviewUsers ? db.adultPreviewUsers.length : 0;
+    const avgClicks = uniqueUsers > 0 ? (totalClicks / uniqueUsers).toFixed(1) : 0;
+
     await ctx.reply(
       `📊 Statistics\n\n` +
       `👥 Unique users: ${db.users.length}\n` +
       `🚀 Total /start: ${db.stats.starts}\n` +
       `👀 Preview clicks: ${db.stats.previewClicks}\n` +
-      `🔞 18+ Preview clicks: ${db.stats.adultPreviewClicks}\n` +
+      `🔞 18+ Preview clicks: ${totalClicks} (~${uniqueUsers} unique users, avg ${avgClicks}x each)\n` +
       `📸 18+ Album size: ${db.adultPreviews.length}\n` +
       `💎 Paid (TON): ${db.paid.length}\n` +
       `⭐ Paid (Stars): ${db.paidStars.length}\n` +
