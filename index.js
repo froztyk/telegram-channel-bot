@@ -91,13 +91,13 @@ bot.command('start', async (ctx) => {
 bot.action('buy_stars', async (ctx) => {
   try { await ctx.answerCbQuery(); } catch {}
   try {
-    await ctx.replyWithInvoice(
-      'Channel Access',
-      'Get exclusive access to the channel for ' + STARS_PRICE + ' Telegram Stars.',
-      'stars_channel_access',
-      'XTR',
-      [{ label: 'Channel Access', amount: STARS_PRICE }]
-    );
+    await ctx.telegram.sendInvoice(ctx.chat.id, {
+      title: 'Channel Access',
+      description: 'Get exclusive access to the channel for ' + STARS_PRICE + ' Telegram Stars.',
+      payload: 'stars_channel_access',
+      currency: 'XTR',
+      prices: [{ label: 'Channel Access', amount: STARS_PRICE }]
+    });
   } catch (e) {
     console.error('Stars invoice error:', e);
     await ctx.reply('⚠️ Could not create Stars invoice. Please try again later.');
